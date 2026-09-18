@@ -75,6 +75,15 @@ def _database() -> None:
     asyncio.run(_reset_schema())
 
 
+@pytest.fixture(autouse=True)
+def _no_broker(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Prevent tests from publishing stray Celery messages to Redis."""
+    from app.workers import execute as execute_module
+
+    monkeypatch.setattr(execute_module, "enqueue_run_item", lambda run_item_id: None)
+    monkeypatch.setattr(execute_module, "publish_dead_letter", lambda run_item_id: None)
+
+
 @pytest_asyncio.fixture
 async def session() -> AsyncIterator[AsyncSession]:
     engine = create_async_engine(_test_dsn(), poolclass=NullPool)
@@ -89,6 +98,16 @@ async def session() -> AsyncIterator[AsyncSession]:
             yield s
         await transaction.rollback()
     await engine.dispose()
+
+
+@pytest_asyncio.fixture
+async def session_factory(session: AsyncSession) -> async_sessionmaker[AsyncSession]:
+    """Session factory bound to the test connection (used by the executor)."""
+    return async_sessionmaker(
+        bind=session.bind,
+        expire_on_commit=False,
+        join_transaction_mode="create_savepoint",
+    )
 
 
 @pytest_asyncio.fixture

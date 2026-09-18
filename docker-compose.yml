@@ -32,6 +32,7 @@ services:
       ENVIRONMENT: development
       DATABASE_URL: postgresql+asyncpg://eval:eval@postgres:5432/eval
       REDIS_URL: redis://redis:6379/0
+      EVAL_API_URL: http://api:8000
     ports:
       - "8002:8000"
     volumes:
@@ -44,11 +45,14 @@ services:
 
   worker:
     build: .
-    command: celery -A app.worker:celery_app worker --loglevel=info
+    command: celery -A app.workers.execute:celery_app worker --queues evals --loglevel=info --concurrency ${WORKER_CONCURRENCY:-4}
     environment:
       ENVIRONMENT: development
       DATABASE_URL: postgresql+asyncpg://eval:eval@postgres:5432/eval
       REDIS_URL: redis://redis:6379/0
+      EVAL_PROVIDER: ${EVAL_PROVIDER:-fake}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
     volumes:
       - .:/srv/app
     depends_on:

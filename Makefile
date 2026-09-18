@@ -19,5 +19,8 @@ test: ## run the test suite
 	$(RUN_API) env PYTEST_ADDOPTS="-o cache_dir=/tmp/.pytest_cache" pytest
 
 lint: ## run ruff checks
-	$(RUN_API) env RUFF_CACHE_DIR=/tmp/.ruff_cache ruff check app tests alembic
-	$(RUN_API) env RUFF_CACHE_DIR=/tmp/.ruff_cache ruff format --check app tests alembic
+	$(RUN_API) env RUFF_CACHE_DIR=/tmp/.ruff_cache ruff check app tests alembic scripts
+	$(RUN_API) env RUFF_CACHE_DIR=/tmp/.ruff_cache ruff format --check app tests alembic scripts
+
+load: ## seed 50 tasks x 3 models and run an eval against FakeProvider
+	$(RUN_API) python scripts/seed_and_run.py
