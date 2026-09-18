@@ -1,4 +1,42 @@
+import json
+
+from app.providers.base import CompletionResult
 from httpx import AsyncClient
+
+
+class ScriptedProvider:
+    """Returns scripted responses in order; repeats the last one forever."""
+
+    def __init__(self, responses: list[str] | str) -> None:
+        self.responses = [responses] if isinstance(responses, str) else responses
+        self.calls = 0
+
+    async def complete(self, prompt: str, model_id: str) -> CompletionResult:
+        index = min(self.calls, len(self.responses) - 1)
+        self.calls += 1
+        return CompletionResult(
+            text=self.responses[index],
+            prompt_tokens=1,
+            completion_tokens=1,
+            latency_ms=1,
+        )
+
+    def with_base_url(self, base_url: str) -> "ScriptedProvider":
+        return self
+
+
+def judge_json(
+    overall: float,
+    rubric_scores: dict[str, float] | None = None,
+    rationale: str = "looks correct",
+) -> str:
+    return json.dumps(
+        {
+            "rubric_scores": rubric_scores or {"accuracy": overall},
+            "overall": overall,
+            "rationale": rationale,
+        }
+    )
 
 
 async def seed_task_set(client: AsyncClient, n_tasks: int, name: str = "test-set") -> str:

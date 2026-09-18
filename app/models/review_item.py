@@ -4,10 +4,11 @@ from decimal import Decimal
 
 from sqlalchemy import DateTime, ForeignKey, Index, Numeric, Text, text
 from sqlalchemy import Enum as SAEnum
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin
 from app.models.enums import ReviewReason, ReviewStatus, enum_values
+from app.models.eval_run import RunItem
 
 
 class ReviewItem(TimestampMixin, Base):
@@ -33,3 +34,5 @@ class ReviewItem(TimestampMixin, Base):
     reviewer_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    run_item: Mapped[RunItem] = relationship()

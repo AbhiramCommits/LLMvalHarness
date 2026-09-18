@@ -23,6 +23,10 @@ class Settings(BaseSettings):
     retry_max_attempts: int = 5
     retry_base_delay_ms: int = 100
     retry_max_delay_ms: int = 10_000
+    judge_model_id: str = "gpt-4o-mini"
+    disagreement_threshold: float = 0.5
+    low_confidence_min: float = 0.4
+    low_confidence_max: float = 0.6
 
 
 @lru_cache

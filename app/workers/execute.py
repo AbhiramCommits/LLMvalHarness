@@ -30,6 +30,7 @@ from sqlalchemy.ext.asyncio import (
 from app.artifacts import set_artifact
 from app.config import get_settings
 from app.db import SessionFactory
+from app.graders.pipeline import grade_run_item
 from app.models import (
     EvalRun,
     EvalRunStatus,
@@ -145,7 +146,7 @@ async def execute_run_item(
     async with factory() as session:
         row = (
             await session.execute(
-                select(RunItem, Task.prompt, ModelEndpoint, EvalRun.status)
+                select(RunItem, Task, ModelEndpoint, EvalRun.status)
                 .join(Task, Task.id == RunItem.task_id)
                 .join(ModelEndpoint, ModelEndpoint.id == RunItem.model_endpoint_id)
                 .join(EvalRun, EvalRun.id == RunItem.eval_run_id)
@@ -154,7 +155,7 @@ async def execute_run_item(
         ).first()
         if row is None:
             raise ValueError(f"run item {rid} not found")
-        run_item, prompt, endpoint, run_status = row
+        run_item, task, endpoint, run_status = row
         eval_run_id = run_item.eval_run_id
 
     if run_status == EvalRunStatus.cancelled:
@@ -181,7 +182,7 @@ async def execute_run_item(
     for attempt in range(1, retry_config.max_attempts + 1):
         await _mark_running(factory, rid)
         try:
-            result = await effective_provider.complete(prompt, endpoint.model_id)
+            result = await effective_provider.complete(task.prompt, endpoint.model_id)
             last_error = None
             break
         except RetryableProviderError as exc:
@@ -197,12 +198,14 @@ async def execute_run_item(
                 await asyncio.sleep(backoff_delay(attempt, retry_config))
         except NonRetryableProviderError as exc:
             await _mark_failed(factory, rid, str(exc))
+            await _maybe_complete_run(factory, eval_run_id)
             return {"status": RunItemStatus.failed.value, "reason": "non-retryable"}
 
     if result is None:
         error_text = f"exhausted {retry_config.max_attempts} attempts: {last_error}"
         await _mark_dead_lettered(factory, rid, error_text)
         publish_dead_letter(str(rid))
+        await _maybe_complete_run(factory, eval_run_id)
         return {"status": RunItemStatus.dead_lettered.value, "reason": "retries-exhausted"}
 
     async with factory() as session:
@@ -216,7 +219,7 @@ async def execute_run_item(
     cost = compute_cost(endpoint.model_id, result.prompt_tokens, result.completion_tokens)
     artifact = {
         "request": {
-            "prompt": prompt,
+            "prompt": task.prompt,
             "model_id": endpoint.model_id,
             "base_url": endpoint.base_url,
         },
@@ -263,6 +266,44 @@ async def execute_run_item(
                     total_tokens=EvalRun.total_tokens + delta_tokens,
                 )
             )
+
+    # Grading runs after the item is finalized. A judge parse failure records
+    # a failed Grade; any other pipeline error fails the item explicitly.
+    grading_error: Exception | None = None
+    try:
+        await grade_run_item(
+            rid,
+            task,
+            result.text,
+            provider=provider,
+            session_factory=factory,
+        )
+    except Exception as exc:
+        grading_error = exc
+        logger.exception("grading failed for run item %s", rid)
+        await _mark_failed(factory, rid, f"grading pipeline failed: {exc}")
+
+    await _maybe_complete_run(factory, eval_run_id)
+
+    if grading_error is not None:
+        return {"status": RunItemStatus.failed.value, "reason": "grading-failed"}
+
+    logger.info(
+        "run item %s succeeded (latency_ms=%d, cost=$%s)",
+        rid,
+        result.latency_ms,
+        cost,
+    )
+    return {"status": RunItemStatus.succeeded.value}
+
+
+async def _maybe_complete_run(
+    factory: async_sessionmaker[AsyncSession],
+    eval_run_id: uuid.UUID,
+) -> None:
+    """Mark the eval run terminal once no queued/running items remain."""
+    async with factory() as session:
+        async with session.begin():
             remaining = await session.scalar(
                 select(func.count())
                 .select_from(RunItem)
@@ -292,14 +333,6 @@ async def execute_run_item(
                     )
                     .values(status=EvalRunStatus.completed, completed_at=func.now())
                 )
-
-    logger.info(
-        "run item %s succeeded (latency_ms=%d, cost=$%s)",
-        rid,
-        result.latency_ms,
-        cost,
-    )
-    return {"status": RunItemStatus.succeeded.value}
 
 
 async def _mark_running(factory: async_sessionmaker[AsyncSession], rid: uuid.UUID) -> None:

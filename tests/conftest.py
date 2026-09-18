@@ -111,6 +111,15 @@ async def session_factory(session: AsyncSession) -> async_sessionmaker[AsyncSess
 
 
 @pytest_asyncio.fixture
+async def real_session_factory() -> AsyncIterator[async_sessionmaker[AsyncSession]]:
+    """Committed (non-rollback) sessions for cross-connection race tests."""
+    engine = create_async_engine(_test_dsn())
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    yield factory
+    await engine.dispose()
+
+
+@pytest_asyncio.fixture
 async def client(session: AsyncSession) -> AsyncIterator[AsyncClient]:
     app = create_app()
 

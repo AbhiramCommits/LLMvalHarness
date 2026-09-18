@@ -4,10 +4,12 @@ from decimal import Decimal
 
 from sqlalchemy import DateTime, ForeignKey, Index, Integer, Numeric, Text, func, text
 from sqlalchemy import Enum as SAEnum
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin
 from app.models.enums import EvalRunStatus, RunItemStatus, enum_values
+from app.models.model_endpoint import ModelEndpoint
+from app.models.task import Task, TaskSet
 
 
 class EvalRun(TimestampMixin, Base):
@@ -37,6 +39,8 @@ class EvalRun(TimestampMixin, Base):
         default=0,
         server_default=text("0"),
     )
+
+    task_set: Mapped[TaskSet] = relationship()
 
 
 class RunItem(Base):
@@ -85,3 +89,7 @@ class RunItem(Base):
         onupdate=func.now(),
         nullable=False,
     )
+
+    eval_run: Mapped[EvalRun] = relationship()
+    task: Mapped[Task] = relationship()
+    model_endpoint: Mapped[ModelEndpoint] = relationship()

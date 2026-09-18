@@ -5,10 +5,11 @@ from typing import Any
 from sqlalchemy import Boolean, ForeignKey, Index, Numeric, Text
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin
 from app.models.enums import GraderKind, enum_values
+from app.models.eval_run import RunItem
 
 
 class Grade(TimestampMixin, Base):
@@ -24,7 +25,9 @@ class Grade(TimestampMixin, Base):
         SAEnum(GraderKind, name="grader_kind", values_callable=enum_values),
         nullable=False,
     )
-    score: Mapped[Decimal] = mapped_column(Numeric(4, 3), nullable=False)
-    passed: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    score: Mapped[Decimal | None] = mapped_column(Numeric(4, 3), nullable=True)
+    passed: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     rubric_scores: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     rationale: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    run_item: Mapped[RunItem] = relationship()

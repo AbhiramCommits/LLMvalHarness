@@ -9,6 +9,13 @@ from app.schemas.eval_run import (
     StatusCounts,
 )
 from app.schemas.model_endpoint import ModelEndpointCreate, ModelEndpointRead
+from app.schemas.review import (
+    GradeRead,
+    ResolveRequest,
+    ReviewItemRead,
+    ReviewQueueItem,
+    ReviewStats,
+)
 from app.schemas.task import TaskCreate, TaskRead
 from app.schemas.task_set import TaskSetCreate, TaskSetRead
 
@@ -17,11 +24,16 @@ __all__ = [
     "EvalRunAccepted",
     "EvalRunCreate",
     "EvalRunRead",
+    "GradeRead",
     "HealthStatus",
     "ModelAggregate",
     "ModelEndpointCreate",
     "ModelEndpointRead",
     "ReplayResponse",
+    "ResolveRequest",
+    "ReviewItemRead",
+    "ReviewQueueItem",
+    "ReviewStats",
     "StatusCounts",
     "TaskCreate",
     "TaskRead",
