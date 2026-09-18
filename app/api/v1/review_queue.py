@@ -6,7 +6,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.artifacts import get_artifact
-from app.db import get_session
+from app.db import get_session, updated_rowcount
 from app.models import Grade, ReviewItem, ReviewStatus, RunItem, Task
 from app.schemas.review import (
     GradeRead,
@@ -126,8 +126,9 @@ async def claim_review_item(
         .values(status=ReviewStatus.claimed, claimed_at=func.now())
     )
     await session.commit()
-    if result.rowcount == 1:
+    if updated_rowcount(result) == 1:
         review_item = await session.get(ReviewItem, review_item_id)
+        assert review_item is not None
         await session.refresh(review_item)
         return _review_item_read(review_item)
     review_item = await session.get(ReviewItem, review_item_id)
@@ -160,8 +161,9 @@ async def resolve_review_item(
         )
     )
     await session.commit()
-    if result.rowcount == 1:
+    if updated_rowcount(result) == 1:
         review_item = await session.get(ReviewItem, review_item_id)
+        assert review_item is not None
         await session.refresh(review_item)
         return _review_item_read(review_item)
     review_item = await session.get(ReviewItem, review_item_id)

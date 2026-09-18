@@ -16,7 +16,7 @@ router = APIRouter()
 async def create_task_set(
     payload: TaskSetCreate,
     session: AsyncSession = Depends(get_session),
-) -> TaskSetRead:
+) -> TaskSet:
     task_set = TaskSet(name=payload.name, description=payload.description)
     session.add(task_set)
     await session.commit()
@@ -27,7 +27,7 @@ async def create_task_set(
 @router.get("", response_model=list[TaskSetRead])
 async def list_task_sets(
     session: AsyncSession = Depends(get_session),
-) -> list[TaskSetRead]:
+) -> list[TaskSet]:
     result = await session.execute(select(TaskSet).order_by(TaskSet.created_at))
     return list(result.scalars().all())
 
@@ -36,7 +36,7 @@ async def list_task_sets(
 async def get_task_set(
     task_set_id: UUID,
     session: AsyncSession = Depends(get_session),
-) -> TaskSetRead:
+) -> TaskSet:
     task_set = await session.get(TaskSet, task_set_id)
     if task_set is None:
         raise HTTPException(
@@ -55,7 +55,7 @@ async def create_task(
     task_set_id: UUID,
     payload: TaskCreate,
     session: AsyncSession = Depends(get_session),
-) -> TaskRead:
+) -> Task:
     task_set = await session.get(TaskSet, task_set_id)
     if task_set is None:
         raise HTTPException(

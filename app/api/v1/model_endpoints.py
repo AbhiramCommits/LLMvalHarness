@@ -15,7 +15,7 @@ router = APIRouter()
 async def create_model_endpoint(
     payload: ModelEndpointCreate,
     session: AsyncSession = Depends(get_session),
-) -> ModelEndpointRead:
+) -> ModelEndpoint:
     endpoint = ModelEndpoint(**payload.model_dump())
     session.add(endpoint)
     await session.commit()
@@ -26,7 +26,7 @@ async def create_model_endpoint(
 @router.get("", response_model=list[ModelEndpointRead])
 async def list_model_endpoints(
     session: AsyncSession = Depends(get_session),
-) -> list[ModelEndpointRead]:
+) -> list[ModelEndpoint]:
     result = await session.execute(select(ModelEndpoint).order_by(ModelEndpoint.created_at))
     return list(result.scalars().all())
 
@@ -35,7 +35,7 @@ async def list_model_endpoints(
 async def get_model_endpoint(
     endpoint_id: UUID,
     session: AsyncSession = Depends(get_session),
-) -> ModelEndpointRead:
+) -> ModelEndpoint:
     endpoint = await session.get(ModelEndpoint, endpoint_id)
     if endpoint is None:
         raise HTTPException(

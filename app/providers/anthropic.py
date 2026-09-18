@@ -21,7 +21,7 @@ class AnthropicProvider(BaseProvider):
         timeout_seconds: float = 60.0,
     ) -> None:
         self.api_key = api_key
-        self.base_url = base_url
+        self.base_url: str = base_url
         self.timeout_seconds = timeout_seconds
 
     async def complete(self, prompt: str, model_id: str) -> CompletionResult:

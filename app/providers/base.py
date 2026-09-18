@@ -27,6 +27,8 @@ class NonRetryableProviderError(ProviderError):
 class Provider(Protocol):
     async def complete(self, prompt: str, model_id: str) -> CompletionResult: ...
 
+    def with_base_url(self, base_url: str) -> "Provider": ...
+
 
 class BaseProvider(Provider, ABC):
     base_url: str | None = None

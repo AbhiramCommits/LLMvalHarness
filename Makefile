@@ -18,6 +18,14 @@ migrate: ## apply alembic migrations
 test: ## run the test suite
 	$(RUN_API) env PYTEST_ADDOPTS="-o cache_dir=/tmp/.pytest_cache" pytest
 
+coverage: ## run tests with coverage (>=80% required on app/graders, app/workers, app/api)
+	$(RUN_API) env PYTEST_ADDOPTS="-o cache_dir=/tmp/.pytest_cache" pytest \
+		--cov=app/graders --cov=app/workers --cov=app/api \
+		--cov-report=term-missing --cov-fail-under=80
+
+typecheck: ## run mypy
+	$(RUN_API) env MYPY_CACHE_DIR=/tmp/.mypy_cache mypy app tests
+
 lint: ## run ruff checks
 	$(RUN_API) env RUFF_CACHE_DIR=/tmp/.ruff_cache ruff check app tests alembic scripts
 	$(RUN_API) env RUFF_CACHE_DIR=/tmp/.ruff_cache ruff format --check app tests alembic scripts

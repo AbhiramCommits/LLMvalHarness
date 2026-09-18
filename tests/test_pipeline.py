@@ -1,7 +1,12 @@
 import uuid
 from decimal import Decimal
 
-from app.graders.pipeline import authoritative_score, grade_run_item
+import pytest
+from app.graders.pipeline import (
+    authoritative_score,
+    grade_run_item,
+    rubric_from_config,
+)
 from app.models import (
     EvalRun,
     EvalRunStatus,
@@ -17,6 +22,7 @@ from app.models import (
     TaskSet,
 )
 from app.models.enums import GraderType
+from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -288,3 +294,13 @@ def test_authoritative_score_means_grades() -> None:
 def test_authoritative_score_none_without_signal() -> None:
     review = ReviewItem(reviewer_label=None)
     assert authoritative_score(review, [Grade(score=None)]) is None
+
+
+def test_rubric_from_config_missing_returns_none() -> None:
+    assert rubric_from_config(None) is None
+    assert rubric_from_config({"other": 1}) is None
+
+
+def test_rubric_from_config_rejects_invalid_criteria() -> None:
+    with pytest.raises(ValidationError):
+        rubric_from_config({"rubric": [{"name": "accuracy"}]})

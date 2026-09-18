@@ -29,7 +29,7 @@ from sqlalchemy.ext.asyncio import (
 
 from app.artifacts import set_artifact
 from app.config import get_settings
-from app.db import SessionFactory
+from app.db import SessionFactory, updated_rowcount
 from app.graders.pipeline import grade_run_item
 from app.models import (
     EvalRun,
@@ -255,7 +255,7 @@ async def execute_run_item(
                     updated_at=func.now(),
                 )
             )
-            if updated.rowcount == 0:
+            if updated_rowcount(updated) == 0:
                 logger.warning("run item %s already finalized; skipping rollup", rid)
                 return {"status": "skipped", "reason": "already-finalized"}
             await session.execute(

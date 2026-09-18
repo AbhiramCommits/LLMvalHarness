@@ -8,6 +8,7 @@ from app.schemas.eval_run import (
     ReplayResponse,
     StatusCounts,
 )
+from app.schemas.leaderboard import CapabilityRow, HistoryPoint, LeaderboardRow
 from app.schemas.model_endpoint import ModelEndpointCreate, ModelEndpointRead
 from app.schemas.review import (
     GradeRead,
@@ -20,12 +21,15 @@ from app.schemas.task import TaskCreate, TaskRead
 from app.schemas.task_set import TaskSetCreate, TaskSetRead
 
 __all__ = [
+    "CapabilityRow",
     "DeadLetterRead",
     "EvalRunAccepted",
     "EvalRunCreate",
     "EvalRunRead",
     "GradeRead",
     "HealthStatus",
+    "HistoryPoint",
+    "LeaderboardRow",
     "ModelAggregate",
     "ModelEndpointCreate",
     "ModelEndpointRead",

@@ -45,7 +45,10 @@ class EvalRun(TimestampMixin, Base):
 
 class RunItem(Base):
     __tablename__ = "run_item"
-    __table_args__ = (Index("ix_run_item_eval_run_id_status", "eval_run_id", "status"),)
+    __table_args__ = (
+        Index("ix_run_item_eval_run_id_status", "eval_run_id", "status"),
+        Index("ix_run_item_task_id_status", "task_id", "status"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     eval_run_id: Mapped[uuid.UUID] = mapped_column(

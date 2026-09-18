@@ -1,6 +1,13 @@
 from fastapi import APIRouter
 
-from app.api.v1 import dead_letters, eval_runs, model_endpoints, review_queue, task_sets
+from app.api.v1 import (
+    dead_letters,
+    eval_runs,
+    leaderboard,
+    model_endpoints,
+    review_queue,
+    task_sets,
+)
 
 api_router = APIRouter()
 api_router.include_router(task_sets.router, prefix="/task-sets", tags=["task-sets"])
@@ -11,4 +18,9 @@ api_router.include_router(
     review_queue.router,
     prefix="/review-queue",
     tags=["review-queue"],
+)
+api_router.include_router(
+    leaderboard.router,
+    prefix="/leaderboard",
+    tags=["leaderboard"],
 )
