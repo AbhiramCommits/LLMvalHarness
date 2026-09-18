@@ -1,0 +1,46 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "llm-eval-harness"
+version = "0.1.0"
+description = "LLM evaluation harness: task sets, graded eval runs, and human review"
+requires-python = ">=3.12"
+dependencies = [
+    "alembic>=1.13",
+    "asyncpg>=0.29",
+    "celery>=5.4",
+    "fastapi>=0.115",
+    "pydantic>=2.8",
+    "pydantic-settings>=2.4",
+    "redis>=5.0",
+    "sqlalchemy[asyncio]>=2.0.32",
+    "uvicorn[standard]>=0.30",
+]
+
+[project.optional-dependencies]
+dev = [
+    "httpx>=0.27",
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.6",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["app", "tests", "alembic"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["fastapi.Depends"]
