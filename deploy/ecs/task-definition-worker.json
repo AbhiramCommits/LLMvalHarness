@@ -1,0 +1,52 @@
+{
+  "family": "llm-eval-harness-worker",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "1024",
+  "memory": "2048",
+  "executionRoleArn": "arn:aws:iam::${AWS_ACCOUNT_ID}:role/ecsTaskExecutionRole",
+  "containerDefinitions": [
+    {
+      "name": "worker",
+      "image": "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/llm-eval-harness:latest",
+      "essential": true,
+      "command": [
+        "celery", "-A", "app.workers.execute:celery_app",
+        "worker", "--queues", "evals",
+        "--loglevel=info", "--concurrency", "4"
+      ],
+      "environment": [
+        { "name": "ENVIRONMENT", "value": "production" },
+        { "name": "EVAL_PROVIDER", "value": "openai" },
+        { "name": "PROMETHEUS_MULTIPROC_DIR", "value": "/tmp/prometheus-multiproc" }
+      ],
+      "secrets": [
+        {
+          "name": "DATABASE_URL",
+          "valueFrom": "arn:aws:ssm:${AWS_REGION}:${AWS_ACCOUNT_ID}:parameter/llm-eval-harness/database_url"
+        },
+        {
+          "name": "REDIS_URL",
+          "valueFrom": "arn:aws:ssm:${AWS_REGION}:${AWS_ACCOUNT_ID}:parameter/llm-eval-harness/redis_url"
+        },
+        {
+          "name": "OPENAI_API_KEY",
+          "valueFrom": "arn:aws:ssm:${AWS_REGION}:${AWS_ACCOUNT_ID}:parameter/llm-eval-harness/openai_api_key"
+        },
+        {
+          "name": "ANTHROPIC_API_KEY",
+          "valueFrom": "arn:aws:ssm:${AWS_REGION}:${AWS_ACCOUNT_ID}:parameter/llm-eval-harness/anthropic_api_key"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/llm-eval-harness/worker",
+          "awslogs-region": "${AWS_REGION}",
+          "awslogs-create-group": "true",
+          "awslogs-stream-prefix": "worker"
+        }
+      }
+    }
+  ]
+}

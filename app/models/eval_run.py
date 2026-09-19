@@ -39,6 +39,7 @@ class EvalRun(TimestampMixin, Base):
         default=0,
         server_default=text("0"),
     )
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     task_set: Mapped[TaskSet] = relationship()
 

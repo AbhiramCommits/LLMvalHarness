@@ -7,8 +7,10 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth import require_role
 from app.db import get_session
 from app.models import (
+    ApiKeyRole,
     EvalRun,
     EvalRunStatus,
     ModelEndpoint,
@@ -27,7 +29,7 @@ from app.schemas.eval_run import (
 )
 from app.workers import execute
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_role(ApiKeyRole.admin))])
 
 
 @router.post("", response_model=EvalRunAccepted, status_code=status.HTTP_202_ACCEPTED)

@@ -67,16 +67,25 @@ used for local dev and tests.
 ```bash
 docker compose up -d --build   # postgres + redis + api + worker
 make migrate                   # apply alembic migrations
-make load                      # seed 50 tasks x 3 models and run an eval
+make load                      # creates a throwaway admin key, seeds 50x3, runs an eval
+```
+
+API endpoints require an API key (hashed in Postgres, roles admin/reviewer).
+Create one for manual use:
+
+```bash
+docker compose exec api python scripts/create_api_key.py dev-admin admin
+# prints the raw key exactly once
 ```
 
 Then poke the API (host port 8002 by default):
 
 ```bash
-curl localhost:8002/healthz
-curl localhost:8002/v1/task-sets
-curl "localhost:8002/v1/leaderboard"
-curl "localhost:8002/v1/review-queue/stats"
+curl -H "X-API-Key: <key>" localhost:8002/v1/task-sets
+curl -H "X-API-Key: <key>" "localhost:8002/v1/leaderboard"
+curl localhost:8002/healthz          # liveness, no auth
+curl localhost:8002/readyz           # postgres + redis + broker, no auth
+curl localhost:8002/metrics          # prometheus, no auth
 ```
 
 To use a real provider, set `EVAL_PROVIDER=openai|anthropic` plus
@@ -87,26 +96,34 @@ compose up` (see `.env.example`).
 
 | Method | Path | Description |
 | --- | --- | --- |
-| GET | `/healthz` | Liveness check |
-| POST | `/v1/task-sets` | Create task set |
-| GET | `/v1/task-sets` | List task sets |
-| GET | `/v1/task-sets/{id}` | Get task set |
-| POST | `/v1/task-sets/{id}/tasks` | Add task (prompt, capability, grader) |
-| POST | `/v1/models` | Register model endpoint |
-| GET | `/v1/models` | List model endpoints |
-| GET | `/v1/models/{id}` | Get model endpoint |
-| POST | `/v1/eval-runs` | Start run; fans out task x model items, enqueues to Celery, 202 |
-| GET | `/v1/eval-runs/{id}` | Status + per-model aggregates (counts, mean latency, cost) |
-| POST | `/v1/eval-runs/{id}/cancel` | Cancel run; workers check before executing |
-| GET | `/v1/eval-runs/{id}/dead-letters` | List dead-lettered items |
-| POST | `/v1/dead-letters/{run_item_id}/replay` | Requeue a dead-lettered item (idempotent cost rollup) |
-| GET | `/v1/review-queue?status=&capability=&limit=` | Review items, oldest first, with prompt, model output, grades |
-| POST | `/v1/review-queue/{id}/claim` | Atomically claim an open review item (409 on conflict) |
-| POST | `/v1/review-queue/{id}/resolve` | Resolve with `{label: 0..1, notes}`; label is authoritative |
-| GET | `/v1/review-queue/stats` | Open/claimed/resolved counts, mean time-to-resolve |
-| GET | `/v1/leaderboard?task_set_id=&capability=` | Per-model mean score, pass rate, n, mean/p95 latency, cost |
-| GET | `/v1/leaderboard/history?model_name=` | Score per model_version over eval runs (regression view) |
-| GET | `/v1/leaderboard/capabilities?model_endpoint_id=` | Score breakdown by capability |
+| GET | `/healthz` | Liveness check (no auth) |
+| GET | `/readyz` | Readiness: Postgres + Redis + broker (no auth) |
+| GET | `/metrics` | Prometheus metrics (no auth) |
+| POST | `/v1/api-keys` | Create API key (admin); raw key returned once |
+| GET | `/v1/api-keys` | List API keys (admin) |
+| DELETE | `/v1/api-keys/{id}` | Revoke API key (admin) |
+| POST | `/v1/task-sets` | Create task set (admin) |
+| GET | `/v1/task-sets` | List task sets (admin) |
+| GET | `/v1/task-sets/{id}` | Get task set (admin) |
+| POST | `/v1/task-sets/{id}/tasks` | Add task (prompt, capability, grader) (admin) |
+| POST | `/v1/models` | Register model endpoint (admin) |
+| GET | `/v1/models` | List model endpoints (admin) |
+| GET | `/v1/models/{id}` | Get model endpoint (admin) |
+| POST | `/v1/eval-runs` | Start run; fans out task x model items, enqueues to Celery, 202 (admin) |
+| GET | `/v1/eval-runs/{id}` | Status + per-model aggregates (counts, mean latency, cost) (admin) |
+| POST | `/v1/eval-runs/{id}/cancel` | Cancel run; workers check before executing (admin) |
+| GET | `/v1/eval-runs/{id}/dead-letters` | List dead-lettered items (admin) |
+| POST | `/v1/dead-letters/{run_item_id}/replay` | Requeue a dead-lettered item (idempotent cost rollup) (admin) |
+| GET | `/v1/review-queue?status=&capability=&limit=` | Review items, oldest first, with prompt, model output, grades (admin/reviewer) |
+| POST | `/v1/review-queue/{id}/claim` | Atomically claim an open review item (409 on conflict) (admin/reviewer) |
+| POST | `/v1/review-queue/{id}/resolve` | Resolve with `{label: 0..1, notes}`; label is authoritative (admin/reviewer) |
+| GET | `/v1/review-queue/stats` | Open/claimed/resolved counts, mean time-to-resolve (admin/reviewer) |
+| GET | `/v1/leaderboard?task_set_id=&capability=` | Per-model mean score, pass rate, n, mean/p95 latency, cost (admin/reviewer) |
+| GET | `/v1/leaderboard/history?model_name=` | Score per model_version over eval runs (regression view) (admin/reviewer) |
+| GET | `/v1/leaderboard/capabilities?model_endpoint_id=` | Score breakdown by capability (admin/reviewer) |
+
+Auth: API keys are salted PBKDF2 hashes in Postgres; reviewers can only hit
+`/v1/review-queue*` and `/v1/leaderboard*`, admins everything.
 
 ## Execution pipeline
 
@@ -116,8 +133,13 @@ compose up` (see `.env.example`).
   `dead_lettered` and published to `evals.dlq`.
 - Cost is priced per 1M tokens (`app/pricing.py`) and rolled into `eval_run`
   with delta-based updates, so replays never double-count.
+- `MAX_SPEND_PER_RUN_USD` aborts a run once projected spend exceeds the limit:
+  the run is marked failed with a clear error and remaining queued items are
+  failed.
 - Raw provider payloads live in Redis under `artifact:{run_item_id}`;
   PostgreSQL stores only `artifact_key` (rationale in `app/artifacts.py`).
+- Logs are JSON (structlog) with `request_id` and `eval_run_id` in context;
+  Prometheus metrics at `/metrics`.
 
 ## Grading & review
 
@@ -187,8 +209,8 @@ Desktop on an Apple Silicon Mac):
 
 ```
 eval run finished with status=completed
-wall clock: 1.71s
-throughput: 87.5 items/s
+wall clock: 2.49s
+throughput: 60.3 items/s
 
 per-model aggregates:
   fake-model-0: succeeded=50 failed=0 dead_lettered=0 mean_latency_ms=13.26
@@ -199,12 +221,22 @@ per-model aggregates:
 Throughput is bounded by the FakeProvider being instant — real providers will
 dominate the wall clock with their own latency.
 
+## Deployment
+
+- Production compose: `docker-compose.prod.yml` (multi-stage image, pinned
+  deps via `requirements.lock.txt`, healthchecks, no bind mounts).
+- ECS Fargate task definitions + RDS/ElastiCache CloudFormation under
+  `deploy/ecs/`; images push to ECR on every push to `main`
+  (`.github/workflows/deploy.yml`).
+- Step-by-step instructions and the env var table: `docs/DEPLOY.md`.
+- Design rationale and known limits: `docs/DESIGN.md`.
+
 ## Development
 
 ```bash
 make up          # build + start everything
 make migrate     # alembic upgrade head
-make test        # pytest (92 tests)
+make test        # pytest (111 tests)
 make coverage    # pytest + coverage, >=80% required on app/{graders,workers,api}
 make typecheck   # mypy app tests
 make lint        # ruff check + format check

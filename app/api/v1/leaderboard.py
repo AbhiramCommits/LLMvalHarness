@@ -18,10 +18,12 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth import require_role
 from app.db import get_session
+from app.models import ApiKeyRole
 from app.schemas.leaderboard import CapabilityRow, HistoryPoint, LeaderboardRow
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_role(ApiKeyRole.admin, ApiKeyRole.reviewer))])
 
 # One row per succeeded run_item with its effective score plus the dimensions
 # needed by the three endpoints. Callers inject extra joins/filters.

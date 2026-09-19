@@ -6,8 +6,9 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.artifacts import get_artifact
+from app.auth import require_role
 from app.db import get_session, updated_rowcount
-from app.models import Grade, ReviewItem, ReviewStatus, RunItem, Task
+from app.models import ApiKeyRole, Grade, ReviewItem, ReviewStatus, RunItem, Task
 from app.schemas.review import (
     GradeRead,
     ResolveRequest,
@@ -16,7 +17,7 @@ from app.schemas.review import (
     ReviewStats,
 )
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_role(ApiKeyRole.admin, ApiKeyRole.reviewer))])
 
 
 @router.get("", response_model=list[ReviewQueueItem])

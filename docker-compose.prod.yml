@@ -1,0 +1,88 @@
+# Production-style compose. No bind mounts: the image contains the code.
+# Point DATABASE_URL/REDIS_URL at managed RDS/ElastiCache or keep the bundled
+# services for a self-contained deployment. Secrets come from the environment
+# (never committed) -- see docs/DEPLOY.md.
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-eval}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-eval}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-eval}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  api:
+    build: .
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://eval:${POSTGRES_PASSWORD}@postgres:5432/eval}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      ENVIRONMENT: production
+      PROMETHEUS_MULTIPROC_DIR: /tmp/prometheus-multiproc
+    ports:
+      - "${API_PORT:-8000}:8000"
+    volumes:
+      - prometheus-multiproc:/tmp/prometheus-multiproc
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  worker:
+    build: .
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://eval:${POSTGRES_PASSWORD}@postgres:5432/eval}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      ENVIRONMENT: production
+      EVAL_PROVIDER: ${EVAL_PROVIDER:-fake}
+      PROMETHEUS_MULTIPROC_DIR: /tmp/prometheus-multiproc
+    command: celery -A app.workers.execute:celery_app worker --queues evals --loglevel=info --concurrency ${WORKER_CONCURRENCY:-4}
+    volumes:
+      - prometheus-multiproc:/tmp/prometheus-multiproc
+    healthcheck:
+      test: ["CMD", "celery", "-A", "app.workers.execute:celery_app", "inspect", "ping", "-t", "5"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  redisdata:
+  prometheus-multiproc:

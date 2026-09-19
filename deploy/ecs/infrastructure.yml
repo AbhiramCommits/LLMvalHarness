@@ -1,0 +1,131 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  llm-eval-harness infrastructure: ECR repository, RDS Postgres 16,
+  ElastiCache Redis 7, and SSM parameter skeletons. Secrets must be written
+  to the SSM parameters after deployment (never committed) -- see docs/DEPLOY.md.
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC
+  PrivateSubnetA:
+    Type: AWS::EC2::Subnet::Id
+  PrivateSubnetB:
+    Type: AWS::EC2::Subnet::Id
+  DBPassword:
+    Type: String
+    NoEcho: true
+    MinLength: 16
+    Description: Master password for RDS Postgres (write it once, here or via the console).
+
+Resources:
+  EcrRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: llm-eval-harness
+      ImageScanningConfiguration:
+        ScanOnPush: true
+
+  DatabaseSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow postgres from VPC
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          CidrIp: 10.0.0.0/8
+
+  RedisSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow redis from VPC
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 6379
+          ToPort: 6379
+          CidrIp: 10.0.0.0/8
+
+  DatabaseSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Subnets for llm-eval-harness RDS
+      SubnetIds:
+        - !Ref PrivateSubnetA
+        - !Ref PrivateSubnetB
+
+  Database:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Snapshot
+    Properties:
+      Engine: postgres
+      EngineVersion: "16.3"
+      DBInstanceClass: db.t4g.micro
+      AllocatedStorage: 20
+      StorageEncrypted: true
+      MasterUsername: eval
+      MasterUserPassword: !Ref DBPassword
+      DBName: eval
+      DBSubnetGroupName: !Ref DatabaseSubnetGroup
+      VPCSecurityGroups:
+        - !Ref DatabaseSecurityGroup
+      MultiAZ: false
+
+  RedisSubnetGroup:
+    Type: AWS::ElastiCache::SubnetGroup
+    Properties:
+      Description: Subnets for llm-eval-harness ElastiCache
+      SubnetIds:
+        - !Ref PrivateSubnetA
+        - !Ref PrivateSubnetB
+
+  RedisCluster:
+    Type: AWS::ElastiCache::CacheCluster
+    Properties:
+      Engine: redis
+      CacheNodeType: cache.t4g.micro
+      NumCacheNodes: 1
+      CacheSubnetGroupName: !Ref RedisSubnetGroup
+      VpcSecurityGroupIds:
+        - !Ref RedisSecurityGroup
+
+  DatabaseUrlParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /llm-eval-harness/database_url
+      Type: String
+      Value: !Sub "postgresql+asyncpg://eval:${DBPassword}@${Database.Endpoint.Address}:${Database.Endpoint.Port}/eval"
+      Description: "Overwrite with a real secret after deployment; do not commit."
+
+  RedisUrlParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /llm-eval-harness/redis_url
+      Type: String
+      Value: !Sub "redis://${RedisCluster.RedisEndpoint.Address}:${RedisCluster.RedisEndpoint.Port}/0"
+      Description: Overwrite with a real value after deployment.
+
+  OpenAiKeyParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /llm-eval-harness/openai_api_key
+      Type: String
+      Value: CHANGE_ME
+      Description: Overwrite with a real API key after deployment.
+
+  AnthropicKeyParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /llm-eval-harness/anthropic_api_key
+      Type: String
+      Value: CHANGE_ME
+      Description: Overwrite with a real API key after deployment.
+
+Outputs:
+  EcrRepositoryUri:
+    Value: !GetAtt EcrRepository.RepositoryUri
+  DatabaseEndpoint:
+    Value: !GetAtt Database.Endpoint.Address
+  RedisEndpoint:
+    Value: !GetAtt RedisCluster.RedisEndpoint.Address

@@ -4,12 +4,13 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth import require_role
 from app.db import get_session
-from app.models import EvalRun, EvalRunStatus, RunItem, RunItemStatus
+from app.models import ApiKeyRole, EvalRun, EvalRunStatus, RunItem, RunItemStatus
 from app.schemas.eval_run import ReplayResponse
 from app.workers import execute
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_role(ApiKeyRole.admin))])
 
 
 @router.post(
@@ -49,6 +50,18 @@ async def replay_run_item(
             status=RunItemStatus.queued,
             error=None,
             updated_at=func.now(),
+        )
+    )
+    await session.execute(
+        update(EvalRun)
+        .where(
+            EvalRun.id == run_item.eval_run_id,
+            EvalRun.status == EvalRunStatus.failed,
+        )
+        .values(
+            status=EvalRunStatus.running,
+            completed_at=None,
+            error=None,
         )
     )
     await session.commit()

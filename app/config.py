@@ -1,3 +1,4 @@
+from decimal import Decimal
 from functools import lru_cache
 from typing import Literal
 
@@ -27,6 +28,7 @@ class Settings(BaseSettings):
     disagreement_threshold: float = 0.5
     low_confidence_min: float = 0.4
     low_confidence_max: float = 0.6
+    max_spend_per_run_usd: Decimal = Decimal("25.00")
 
 
 @lru_cache

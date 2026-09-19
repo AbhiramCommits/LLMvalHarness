@@ -14,17 +14,19 @@ A judge whose verdict cannot be parsed after 2 attempts records a failed
 Grade (score=NULL) -- never a silent 0.0.
 """
 
-import logging
+import time
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
+import structlog
 from sqlalchemy import exists, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import get_settings
 from app.graders.deterministic import DeterministicGrade, run_deterministic
 from app.graders.llm_judge import JudgeParseError, RubricCriterion, grade
+from app.metrics import GRADE_DURATION, REVIEW_ITEMS
 from app.models import (
     Grade,
     GraderKind,
@@ -34,7 +36,7 @@ from app.models import (
 )
 from app.providers import Provider
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 PASS_THRESHOLD = Decimal("0.5")
 
@@ -92,6 +94,7 @@ async def grade_run_item(
         rubric = rubric_from_config(task.grader_config)
         if rubric is not None:
             try:
+                start = time.perf_counter()
                 verdict = await grade(
                     provider,
                     prompt=task.prompt,
@@ -100,6 +103,7 @@ async def grade_run_item(
                     rubric=rubric,
                     model_id=get_settings().judge_model_id,
                 )
+                GRADE_DURATION.observe(time.perf_counter() - start)
                 judge_score = Decimal(str(verdict.overall)).quantize(_SCORE_QUANTUM)
                 grades.append(
                     Grade(
@@ -138,6 +142,7 @@ async def grade_run_item(
                 select(exists().where(ReviewItem.run_item_id == run_item_id))
             )
             if not already:
+                REVIEW_ITEMS.labels(reason=review_item.reason.value).inc()
                 session.add(review_item)
 
         await session.commit()

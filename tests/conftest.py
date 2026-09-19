@@ -1,4 +1,5 @@
 import asyncio
+import uuid
 from collections.abc import AsyncIterator
 
 import asyncpg
@@ -9,7 +10,7 @@ from app.db import get_session
 from app.main import create_app
 from app.models import Base
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import text
+from sqlalchemy import insert, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
@@ -20,7 +21,11 @@ from sqlalchemy.pool import NullPool
 
 TEST_DATABASE = "eval_test"
 
+TEST_ADMIN_KEY = "test-admin-key-4f2a9c1e8b7d"
+TEST_REVIEWER_KEY = "test-reviewer-key-9c3b1a5d2e6f"
+
 _ENUM_TYPES = [
+    "api_key_role",
     "grader_type",
     "provider",
     "eval_run_status",
@@ -69,10 +74,33 @@ async def _reset_schema() -> None:
     await engine.dispose()
 
 
+async def _seed_api_keys() -> None:
+    from app.auth import hash_api_key, key_prefix
+    from app.models import ApiKey, ApiKeyRole
+
+    engine = create_async_engine(_test_dsn())
+    async with engine.begin() as conn:
+        for name, raw_key, role in [
+            ("test-admin", TEST_ADMIN_KEY, ApiKeyRole.admin),
+            ("test-reviewer", TEST_REVIEWER_KEY, ApiKeyRole.reviewer),
+        ]:
+            await conn.execute(
+                insert(ApiKey).values(
+                    id=uuid.uuid4(),
+                    name=name,
+                    role=role,
+                    key_prefix=key_prefix(raw_key),
+                    key_hash=hash_api_key(raw_key),
+                )
+            )
+    await engine.dispose()
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _database() -> None:
     asyncio.run(_ensure_test_database())
     asyncio.run(_reset_schema())
+    asyncio.run(_seed_api_keys())
 
 
 @pytest.fixture(autouse=True)
@@ -121,12 +149,42 @@ async def real_session_factory() -> AsyncIterator[async_sessionmaker[AsyncSessio
 
 @pytest_asyncio.fixture
 async def client(session: AsyncSession) -> AsyncIterator[AsyncClient]:
+    async for c in _api_client(session, TEST_ADMIN_KEY):
+        yield c
+
+
+@pytest_asyncio.fixture
+async def reviewer_client(session: AsyncSession) -> AsyncIterator[AsyncClient]:
+    async for c in _api_client(session, TEST_REVIEWER_KEY):
+        yield c
+
+
+@pytest_asyncio.fixture
+async def anonymous_client(session: AsyncSession) -> AsyncIterator[AsyncClient]:
+    async for c in _api_client(session, None):
+        yield c
+
+
+async def _api_client(
+    session: AsyncSession,
+    api_key: str | None,
+) -> AsyncIterator[AsyncClient]:
     app = create_app()
+    app.state.auth_session_factory = async_sessionmaker(
+        bind=session.bind,
+        expire_on_commit=False,
+        join_transaction_mode="create_savepoint",
+    )
 
     async def _override_get_session() -> AsyncIterator[AsyncSession]:
         yield session
 
     app.dependency_overrides[get_session] = _override_get_session
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as c:
+    headers = {"X-API-Key": api_key} if api_key else {}
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://test",
+        headers=headers,
+    ) as c:
         yield c

@@ -7,15 +7,15 @@ once; a second failure raises :class:`JudgeParseError` so the caller records a
 """
 
 import json
-import logging
 import re
 from typing import Any
 
+import structlog
 from pydantic import BaseModel, Field, ValidationError, model_validator
 
 from app.providers import Provider
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 class RubricCriterion(BaseModel):

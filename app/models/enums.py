@@ -49,3 +49,8 @@ class ReviewStatus(enum.StrEnum):
     open = "open"
     claimed = "claimed"
     resolved = "resolved"
+
+
+class ApiKeyRole(enum.StrEnum):
+    admin = "admin"
+    reviewer = "reviewer"

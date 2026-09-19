@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from app.api.v1 import (
+    api_keys,
     dead_letters,
     eval_runs,
     leaderboard,
@@ -24,3 +25,4 @@ api_router.include_router(
     prefix="/leaderboard",
     tags=["leaderboard"],
 )
+api_router.include_router(api_keys.router, prefix="/api-keys", tags=["api-keys"])

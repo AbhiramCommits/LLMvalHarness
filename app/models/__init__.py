@@ -1,5 +1,7 @@
+from app.models.api_key import ApiKey
 from app.models.base import Base
 from app.models.enums import (
+    ApiKeyRole,
     EvalRunStatus,
     GraderKind,
     GraderType,
@@ -15,6 +17,8 @@ from app.models.review_item import ReviewItem
 from app.models.task import Task, TaskSet
 
 __all__ = [
+    "ApiKey",
+    "ApiKeyRole",
     "Base",
     "EvalRun",
     "EvalRunStatus",

@@ -12,13 +12,13 @@ so replaying an item can never double-count cost.
 """
 
 import asyncio
-import logging
 import random
 import uuid
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
 
+import structlog
 from celery import Celery
 from sqlalchemy import exists, func, select, update
 from sqlalchemy.ext.asyncio import (
@@ -31,6 +31,8 @@ from app.artifacts import set_artifact
 from app.config import get_settings
 from app.db import SessionFactory, updated_rowcount
 from app.graders.pipeline import grade_run_item
+from app.logging import configure_logging
+from app.metrics import DEAD_LETTERS, EVAL_ITEMS, PROVIDER_LATENCY
 from app.models import (
     EvalRun,
     EvalRunStatus,
@@ -47,7 +49,8 @@ from app.providers import (
     get_provider,
 )
 
-logger = logging.getLogger(__name__)
+configure_logging()
+logger = structlog.get_logger(__name__)
 
 settings = get_settings()
 
@@ -110,6 +113,7 @@ def execute_run_item_task(run_item_id: str) -> dict[str, Any]:
         try:
             return await execute_run_item(run_item_id, session_factory=factory)
         finally:
+            structlog.contextvars.clear_contextvars()
             await engine.dispose()
 
     return asyncio.run(_run())
@@ -136,11 +140,13 @@ async def execute_run_item(
     provider: Provider | None = None,
     session_factory: async_sessionmaker[AsyncSession] | None = None,
     retry: RetryConfig | None = None,
+    max_spend_usd: Decimal | None = None,
 ) -> dict[str, Any]:
     """Execute one run item end to end (provider call, artifact, cost rollup)."""
     factory = session_factory or SessionFactory
     provider = provider or get_provider()
     retry_config = retry or RetryConfig.from_settings()
+    spend_limit = max_spend_usd if max_spend_usd is not None else settings.max_spend_per_run_usd
     rid = uuid.UUID(run_item_id)
 
     async with factory() as session:
@@ -158,9 +164,20 @@ async def execute_run_item(
         run_item, task, endpoint, run_status = row
         eval_run_id = run_item.eval_run_id
 
+    structlog.contextvars.bind_contextvars(
+        eval_run_id=str(eval_run_id),
+        run_item_id=str(rid),
+    )
+
     if run_status == EvalRunStatus.cancelled:
         await _mark_cancelled(factory, rid)
+        EVAL_ITEMS.labels(status="failed", model=endpoint.name).inc()
         return {"status": RunItemStatus.failed.value, "reason": "cancelled"}
+
+    if run_status == EvalRunStatus.failed:
+        await _mark_failed(factory, rid, "eval run aborted")
+        EVAL_ITEMS.labels(status="failed", model=endpoint.name).inc()
+        return {"status": RunItemStatus.failed.value, "reason": "run-aborted"}
 
     if run_item.status == RunItemStatus.succeeded:
         logger.info("run item %s already succeeded; skipping (idempotent)", rid)
@@ -184,6 +201,9 @@ async def execute_run_item(
         try:
             result = await effective_provider.complete(task.prompt, endpoint.model_id)
             last_error = None
+            PROVIDER_LATENCY.labels(provider=settings.eval_provider).observe(
+                result.latency_ms / 1000
+            )
             break
         except RetryableProviderError as exc:
             last_error = exc
@@ -198,6 +218,7 @@ async def execute_run_item(
                 await asyncio.sleep(backoff_delay(attempt, retry_config))
         except NonRetryableProviderError as exc:
             await _mark_failed(factory, rid, str(exc))
+            EVAL_ITEMS.labels(status="failed", model=endpoint.name).inc()
             await _maybe_complete_run(factory, eval_run_id)
             return {"status": RunItemStatus.failed.value, "reason": "non-retryable"}
 
@@ -205,6 +226,8 @@ async def execute_run_item(
         error_text = f"exhausted {retry_config.max_attempts} attempts: {last_error}"
         await _mark_dead_lettered(factory, rid, error_text)
         publish_dead_letter(str(rid))
+        DEAD_LETTERS.inc()
+        EVAL_ITEMS.labels(status="dead_lettered", model=endpoint.name).inc()
         await _maybe_complete_run(factory, eval_run_id)
         return {"status": RunItemStatus.dead_lettered.value, "reason": "retries-exhausted"}
 
@@ -214,6 +237,7 @@ async def execute_run_item(
         )
     if still_running == EvalRunStatus.cancelled:
         await _mark_cancelled(factory, rid)
+        EVAL_ITEMS.labels(status="failed", model=endpoint.name).inc()
         return {"status": RunItemStatus.failed.value, "reason": "cancelled"}
 
     cost = compute_cost(endpoint.model_id, result.prompt_tokens, result.completion_tokens)
@@ -267,6 +291,19 @@ async def execute_run_item(
                 )
             )
 
+    # Enforce the per-run spend limit. The rollup is committed above; when the
+    # running total exceeds the configured maximum, the whole run is aborted:
+    # marked failed with a clear error and remaining queued items are failed.
+    aborted = await _abort_over_budget(factory, eval_run_id, spend_limit)
+    if aborted:
+        logger.warning(
+            "eval run %s aborted: spend limit $%s exceeded",
+            eval_run_id,
+            spend_limit,
+        )
+        EVAL_ITEMS.labels(status="succeeded", model=endpoint.name).inc()
+        return {"status": RunItemStatus.succeeded.value, "reason": "run-aborted"}
+
     # Grading runs after the item is finalized. A judge parse failure records
     # a failed Grade; any other pipeline error fails the item explicitly.
     grading_error: Exception | None = None
@@ -282,12 +319,14 @@ async def execute_run_item(
         grading_error = exc
         logger.exception("grading failed for run item %s", rid)
         await _mark_failed(factory, rid, f"grading pipeline failed: {exc}")
+        EVAL_ITEMS.labels(status="failed", model=endpoint.name).inc()
 
     await _maybe_complete_run(factory, eval_run_id)
 
     if grading_error is not None:
         return {"status": RunItemStatus.failed.value, "reason": "grading-failed"}
 
+    EVAL_ITEMS.labels(status="succeeded", model=endpoint.name).inc()
     logger.info(
         "run item %s succeeded (latency_ms=%d, cost=$%s)",
         rid,
@@ -295,6 +334,44 @@ async def execute_run_item(
         cost,
     )
     return {"status": RunItemStatus.succeeded.value}
+
+
+async def _abort_over_budget(
+    factory: async_sessionmaker[AsyncSession],
+    eval_run_id: uuid.UUID,
+    spend_limit: Decimal,
+) -> bool:
+    """Abort a running eval when its total spend exceeds ``spend_limit``."""
+    async with factory() as session:
+        async with session.begin():
+            result = await session.execute(
+                update(EvalRun)
+                .where(
+                    EvalRun.id == eval_run_id,
+                    EvalRun.status == EvalRunStatus.running,
+                    EvalRun.total_cost_usd > spend_limit,
+                )
+                .values(
+                    status=EvalRunStatus.failed,
+                    completed_at=func.now(),
+                    error=f"aborted: projected spend exceeds limit of ${spend_limit}",
+                )
+            )
+            aborted = updated_rowcount(result) == 1
+            if aborted:
+                await session.execute(
+                    update(RunItem)
+                    .where(
+                        RunItem.eval_run_id == eval_run_id,
+                        RunItem.status == RunItemStatus.queued,
+                    )
+                    .values(
+                        status=RunItemStatus.failed,
+                        error="aborted: eval run spend limit exceeded",
+                        updated_at=func.now(),
+                    )
+                )
+    return aborted
 
 
 async def _maybe_complete_run(

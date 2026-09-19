@@ -31,4 +31,5 @@ lint: ## run ruff checks
 	$(RUN_API) env RUFF_CACHE_DIR=/tmp/.ruff_cache ruff format --check app tests alembic scripts
 
 load: ## seed 50 tasks x 3 models and run an eval against FakeProvider
-	$(RUN_API) python scripts/seed_and_run.py
+	@key=$$(docker compose run --rm -T api python scripts/create_api_key.py load-admin admin | tail -1); \
+	$(RUN_API) env EVAL_API_KEY=$$key python scripts/seed_and_run.py

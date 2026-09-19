@@ -15,10 +15,22 @@ import time
 import httpx
 
 API_URL = os.environ.get("EVAL_API_URL", "http://localhost:8000")
+API_KEY = os.environ.get("EVAL_API_KEY", "")
 NUM_TASKS = 50
 NUM_MODELS = 3
 TERMINAL_STATUSES = {"completed", "failed", "cancelled"}
 POLL_TIMEOUT_SECONDS = 300
+
+
+def _headers() -> dict[str, str]:
+    if not API_KEY:
+        print(
+            "EVAL_API_KEY is not set; create one with "
+            "`python scripts/create_api_key.py load-admin admin`",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    return {"X-API-Key": API_KEY}
 
 
 async def _seed(client: httpx.AsyncClient) -> tuple[str, list[str]]:
@@ -64,7 +76,12 @@ async def _seed(client: httpx.AsyncClient) -> tuple[str, list[str]]:
 
 async def main() -> None:
     print(f"=== llm-eval-harness load test ===\napi: {API_URL}")
-    async with httpx.AsyncClient(base_url=API_URL, timeout=30.0) as client:
+    headers = _headers()
+    async with httpx.AsyncClient(
+        base_url=API_URL,
+        timeout=30.0,
+        headers=headers,
+    ) as client:
         health = await client.get("/healthz")
         health.raise_for_status()
 

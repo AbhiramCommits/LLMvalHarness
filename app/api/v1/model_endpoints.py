@@ -4,11 +4,13 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth import require_role
 from app.db import get_session
+from app.models import ApiKeyRole
 from app.models.model_endpoint import ModelEndpoint
 from app.schemas.model_endpoint import ModelEndpointCreate, ModelEndpointRead
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_role(ApiKeyRole.admin))])
 
 
 @router.post("", response_model=ModelEndpointRead, status_code=status.HTTP_201_CREATED)
