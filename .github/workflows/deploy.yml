@@ -10,21 +10,33 @@ jobs:
     permissions:
       id-token: write
       contents: read
+    env:
+      # Deploy only when the AWS secrets are configured; otherwise every push
+      # to main failed at configure-aws-credentials ("aws-region" missing).
+      HAS_AWS: ${{ secrets.AWS_ACCOUNT_ID != '' && secrets.AWS_REGION != '' }}
     steps:
+      - name: Skip deploy (AWS secrets not configured)
+        if: env.HAS_AWS != 'true'
+        run: echo "::notice::AWS_ACCOUNT_ID / AWS_REGION secrets are not set; skipping image build and push."
       - uses: actions/checkout@v4
+        if: env.HAS_AWS == 'true'
       - uses: aws-actions/configure-aws-credentials@v4
+        if: env.HAS_AWS == 'true'
         with:
           role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/github-actions-ecr
           aws-region: ${{ secrets.AWS_REGION }}
       - uses: aws-actions/amazon-ecr-login@v2
+        if: env.HAS_AWS == 'true'
         id: ecr-login
       - name: Build image
+        if: env.HAS_AWS == 'true'
         run: |
           docker build \
             -t ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/llm-eval-harness:${{ github.sha }} \
             -t ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/llm-eval-harness:latest \
             .
       - name: Push image
+        if: env.HAS_AWS == 'true'
         run: |
           docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/llm-eval-harness:${{ github.sha }}
           docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/llm-eval-harness:latest
